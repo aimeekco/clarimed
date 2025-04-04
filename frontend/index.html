@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthGPT Medical Imaging</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .upload-section.dragover {
+            border-color: #4CAF50;
+            background-color: #E8F5E9;
+        }
+        .task-selector {
+            margin-bottom: 20px;
+        }
+        .task-selector select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .result-section {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            display: none;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            color: #f44336;
+            margin: 10px 0;
+            display: none;
+        }
+        .model-status {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .model-status.loading {
+            background-color: #FFF3E0;
+            color: #E65100;
+        }
+        .model-status.ready {
+            background-color: #E8F5E9;
+            color: #2E7D32;
+        }
+        .model-status.error {
+            background-color: #FFEBEE;
+            color: #C62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>HealthGPT Medical Imaging</h1>
+            <p>Upload your medical scan for analysis or enhancement</p>
+        </div>
+
+        <div id="modelStatus" class="model-status">
+            Checking model status...
+        </div>
+
+        <div class="upload-section" id="dropZone">
+            <p>Drag and drop your medical scan here or</p>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+            <button class="button" onclick="document.getElementById('fileInput').click()">Choose File</button>
+        </div>
+
+        <div class="task-selector">
+            <select id="taskType">
+                <option value="diagnosis">Diagnosis</option>
+                <option value="enhance">Enhance Image</option>
+                <option value="ct2mri">Convert CT to MRI</option>
+                <option value="mri2ct">Convert MRI to CT</option>
+            </select>
+        </div>
+
+        <button class="button" id="processButton" onclick="processImage()" disabled>Process Image</button>
+
+        <div id="loading" class="loading">
+            <div class="loading-spinner"></div>
+            <p id="loadingText">Processing your image...</p>
+        </div>
+
+        <div id="error" class="error"></div>
+
+        <div id="result" class="result-section">
+            <h3>Results</h3>
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+        const API_URL = 'http://localhost:8000';
+
+        // Check model status periodically
+        async function checkModelStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/model-status`);
+                const data = await response.json();
+                const statusDiv = document.getElementById('modelStatus');
+                
+                if (data.status === 'loaded') {
+                    statusDiv.className = 'model-status ready';
+                    statusDiv.textContent = 'Model is ready';
+                    document.getElementById('processButton').disabled = !selectedFile;
+                } else if (data.status === 'loading') {
+                    statusDiv.className = 'model-status loading';
+                    statusDiv.textContent = `Model is loading (${Math.round(data.elapsed_seconds)}s)...`;
+                    document.getElementById('processButton').disabled = true;
+                } else {
+                    statusDiv.className = 'model-status error';
+                    statusDiv.textContent = 'Model failed to load. Please try again later.';
+                    document.getElementById('processButton').disabled = true;
+                }
+            } catch (error) {
+                console.error('Error checking model status:', error);
+            }
+        }
+
+        // Check status every 5 seconds
+        setInterval(checkModelStatus, 5000);
+        checkModelStatus(); // Initial check
+
+        // File selection handling
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            selectedFile = e.target.files[0];
+            document.getElementById('processButton').disabled = !selectedFile;
+        });
+
+        // Drag and drop handling
+        const dropZone = document.getElementById('dropZone');
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            selectedFile = e.dataTransfer.files[0];
+            document.getElementById('processButton').disabled = !selectedFile;
+        });
+
+        async function processImage() {
+            if (!selectedFile) {
+                showError('Please select a file first');
+                return;
+            }
+
+            const loading = document.getElementById('loading');
+            const loadingText = document.getElementById('loadingText');
+            const error = document.getElementById('error');
+            const result = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            const taskType = document.getElementById('taskType').value;
+
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            result.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('scan', selectedFile);
+            formData.append('taskType', taskType);
+
+            try {
+                loadingText.textContent = 'Processing your image...';
+                const response = await fetch(`${API_URL}/api/process-scan`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to process image');
+                }
+
+                if (taskType === 'diagnosis') {
+                    const data = await response.json();
+                    resultContent.innerHTML = `<p>${data.result}</p>`;
+                } else {
+                    // For image generation tasks, create an image element
+                    const blob = await response.blob();
+                    const imageUrl = URL.createObjectURL(blob);
+                    resultContent.innerHTML = `<img src="${imageUrl}" alt="Processed image" style="max-width: 100%;">`;
+                }
+
+                result.style.display = 'block';
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = message;
+            error.style.display = 'block';
+        }
+    </script>
+</body>
+</html> 
