@@ -150,21 +150,17 @@
         let selectedFile = null;
         const API_URL = 'http://localhost:8000';
 
-        // Check model status periodically
+        // Check model status
         async function checkModelStatus() {
             try {
-                const response = await fetch(`${API_URL}/api/model-status`);
+                const response = await fetch(`${API_URL}/api/health`);
                 const data = await response.json();
                 const statusDiv = document.getElementById('modelStatus');
                 
-                if (data.status === 'loaded') {
+                if (data.model_loaded) {
                     statusDiv.className = 'model-status ready';
                     statusDiv.textContent = 'Model is ready';
                     document.getElementById('processButton').disabled = !selectedFile;
-                } else if (data.status === 'loading') {
-                    statusDiv.className = 'model-status loading';
-                    statusDiv.textContent = `Model is loading (${Math.round(data.elapsed_seconds)}s)...`;
-                    document.getElementById('processButton').disabled = true;
                 } else {
                     statusDiv.className = 'model-status error';
                     statusDiv.textContent = 'Model failed to load. Please try again later.';
@@ -172,6 +168,10 @@
                 }
             } catch (error) {
                 console.error('Error checking model status:', error);
+                const statusDiv = document.getElementById('modelStatus');
+                statusDiv.className = 'model-status error';
+                statusDiv.textContent = 'Error connecting to server. Please try again later.';
+                document.getElementById('processButton').disabled = true;
             }
         }
 
@@ -200,34 +200,38 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            selectedFile = e.dataTransfer.files[0];
-            document.getElementById('processButton').disabled = !selectedFile;
+            if (e.dataTransfer.files.length) {
+                selectedFile = e.dataTransfer.files[0];
+                document.getElementById('processButton').disabled = !selectedFile;
+            }
         });
 
+        // Process image
         async function processImage() {
-            if (!selectedFile) {
-                showError('Please select a file first');
-                return;
-            }
+            if (!selectedFile) return;
 
-            const loading = document.getElementById('loading');
-            const loadingText = document.getElementById('loadingText');
-            const error = document.getElementById('error');
-            const result = document.getElementById('result');
-            const resultContent = document.getElementById('resultContent');
             const taskType = document.getElementById('taskType').value;
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            const loadingText = document.getElementById('loadingText');
 
-            loading.style.display = 'block';
-            error.style.display = 'none';
-            result.style.display = 'none';
-
-            const formData = new FormData();
-            formData.append('scan', selectedFile);
-            formData.append('taskType', taskType);
+            // Show loading state
+            loadingDiv.style.display = 'block';
+            errorDiv.style.display = 'none';
+            resultDiv.style.display = 'none';
+            loadingText.textContent = 'Processing your image...';
 
             try {
-                loadingText.textContent = 'Processing your image...';
-                const response = await fetch(`${API_URL}/api/process-scan`, {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                formData.append('task_type', taskType === 'diagnosis' ? 'comprehension' : 'generation');
+                if (taskType === 'diagnosis') {
+                    formData.append('question', 'Please analyze this medical image and provide a diagnosis.');
+                }
+
+                const response = await fetch(`${API_URL}/api/analyze`, {
                     method: 'POST',
                     body: formData
                 });
@@ -237,28 +241,33 @@
                     throw new Error(errorData.detail || 'Failed to process image');
                 }
 
+                const data = await response.json();
+
+                // Display results
                 if (taskType === 'diagnosis') {
-                    const data = await response.json();
-                    resultContent.innerHTML = `<p>${data.result}</p>`;
+                    resultContent.innerHTML = `<p>${data.response || data.detail || 'No response received'}</p>`;
                 } else {
                     // For image generation tasks, create an image element
                     const blob = await response.blob();
                     const imageUrl = URL.createObjectURL(blob);
-                    resultContent.innerHTML = `<img src="${imageUrl}" alt="Processed image" style="max-width: 100%;">`;
+                    resultContent.innerHTML = `
+                        <div>
+                            <h4>Original Image:</h4>
+                            <img src="${URL.createObjectURL(selectedFile)}" alt="Original image" style="max-width: 100%; margin-bottom: 20px;">
+                            <h4>Processed Image:</h4>
+                            <img src="${imageUrl}" alt="Processed image" style="max-width: 100%;">
+                        </div>`;
                 }
 
-                result.style.display = 'block';
-            } catch (err) {
-                showError(err.message);
-            } finally {
-                loading.style.display = 'none';
-            }
-        }
+                resultDiv.style.display = 'block';
 
-        function showError(message) {
-            const error = document.getElementById('error');
-            error.textContent = message;
-            error.style.display = 'block';
+            } catch (error) {
+                console.error('Error processing image:', error);
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
         }
     </script>
 </body>
